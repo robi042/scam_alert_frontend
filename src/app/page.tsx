@@ -1,6 +1,13 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { FormEvent, useEffect, useState } from 'react'
+import type { MapArea } from '@/components/AffectedAreasMap'
+
+const AffectedAreasMap = dynamic(
+  () => import('@/components/AffectedAreasMap'),
+  { ssr: false }
+)
 
 type CategoryCount = {
   categoryId: string
@@ -9,9 +16,17 @@ type CategoryCount = {
   count: number
 }
 
+type Comment = {
+  _id: string
+  body: string
+  createdAt: string
+}
+
 type Report = {
   _id: string
   phoneNumber: string
+  totalReportsForNumber?: number
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   category: {
     _id: string
     name: string
@@ -20,6 +35,10 @@ type Report = {
   description?: string
   reporterIP?: string
   createdAt: string
+  likesCount?: number
+  dislikesCount?: number
+  commentsPreview?: Comment[]
+  totalComments?: number
 }
 
 type Stats = {
@@ -78,6 +97,13 @@ export default function HomePage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [mapAreas, setMapAreas] = useState<MapArea[]>([])
+  const [mapLoading, setMapLoading] = useState(true)
+  const [expandedComments, setExpandedComments] = useState<Record<string, Comment[]>>({})
+  const [loadingMoreComments, setLoadingMoreComments] = useState<Record<string, boolean>>({})
+  const [commentText, setCommentText] = useState<Record<string, string>>({})
+  const [submittingComment, setSubmittingComment] = useState<Record<string, boolean>>({})
+  const [engagementLoading, setEngagementLoading] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     fetchJson<{ categories: Category[] }>(`${API_BASE}/categories`)
@@ -92,6 +118,10 @@ export default function HomePage() {
       })
 
     loadList('', '', 1)
+    fetchJson<{ areas: MapArea[] }>(`${API_BASE}/reports/map-data`)
+      .then((data) => setMapAreas(data.areas || []))
+      .catch((e) => console.error('Map data failed', e))
+      .finally(() => setMapLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -156,6 +186,95 @@ export default function HomePage() {
     await loadList(searchPhone, range, 1)
   }
 
+  const handleLike = async (reportId: string) => {
+    setEngagementLoading((prev) => ({ ...prev, [reportId]: true }))
+    try {
+      await fetchJson(`${API_BASE}/reports/${reportId}/like`, { method: 'POST' })
+      if (listData?.data) {
+        setListData({
+          ...listData,
+          data: listData.data.map((r) =>
+            r._id === reportId ? { ...r, likesCount: (r.likesCount ?? 0) + 1 } : r
+          ),
+        })
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setEngagementLoading((prev) => ({ ...prev, [reportId]: false }))
+    }
+  }
+
+  const handleDislike = async (reportId: string) => {
+    setEngagementLoading((prev) => ({ ...prev, [reportId]: true }))
+    try {
+      await fetchJson(`${API_BASE}/reports/${reportId}/dislike`, { method: 'POST' })
+      if (listData?.data) {
+        setListData({
+          ...listData,
+          data: listData.data.map((r) =>
+            r._id === reportId ? { ...r, dislikesCount: (r.dislikesCount ?? 0) + 1 } : r
+          ),
+        })
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setEngagementLoading((prev) => ({ ...prev, [reportId]: false }))
+    }
+  }
+
+  const handleAddComment = async (reportId: string) => {
+    const body = commentText[reportId]?.trim()
+    if (!body) return
+    setSubmittingComment((prev) => ({ ...prev, [reportId]: true }))
+    try {
+      await fetchJson(`${API_BASE}/reports/${reportId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({ body }),
+      })
+      setCommentText((prev) => ({ ...prev, [reportId]: '' }))
+      setExpandedComments((prev) => {
+        const next = { ...prev }
+        delete next[reportId]
+        return next
+      })
+      await loadList(searchPhone, range, page)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSubmittingComment((prev) => ({ ...prev, [reportId]: false }))
+    }
+  }
+
+  const handleSeeMoreComments = async (reportId: string, r: Report) => {
+    const displayed = expandedComments[reportId] ?? r.commentsPreview ?? []
+    const nextPage = Math.floor(displayed.length / 2) + 1
+    setLoadingMoreComments((prev) => ({ ...prev, [reportId]: true }))
+    try {
+      const res = await fetchJson<{
+        comments: Comment[]
+        pagination: { totalComments: number }
+      }>(`${API_BASE}/reports/${reportId}/comments?page=${nextPage}&limit=2`)
+      setExpandedComments((prev) => ({
+        ...prev,
+        [reportId]: [...displayed, ...res.comments],
+      }))
+      if (listData?.data) {
+        setListData({
+          ...listData,
+          data: listData.data.map((item) =>
+            item._id === reportId ? { ...item, totalComments: res.pagination.totalComments } : item
+          ),
+        })
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoadingMoreComments((prev) => ({ ...prev, [reportId]: false }))
+    }
+  }
+
   return (
     <main>
       <div className="app-shell">
@@ -174,14 +293,15 @@ export default function HomePage() {
         </header>
 
         <div className="app-grid">
-          <section className="glass card-left">
-            <h2 className="card-title">Report a Scam Number</h2>
-            <p className="card-subtitle">
-              Your report is anonymous. We only store the phone, category and a
-              short description.
-            </p>
+          <div className="app-grid-left">
+            <section className="glass card-left">
+              <h2 className="card-title">Report a Scam Number</h2>
+              <p className="card-subtitle">
+                Your report is anonymous. We only store the phone, category and a
+                short description.
+              </p>
 
-            <form onSubmit={handleSubmit}>
+              <form onSubmit={handleSubmit}>
               <div className="field">
                 <label className="field-label">Phone number</label>
                 <input
@@ -239,7 +359,26 @@ export default function HomePage() {
                 {submitting ? 'Submitting…' : 'Submit report'}
               </button>
             </form>
-          </section>
+            </section>
+
+            <section className="glass map-section">
+              <h2 className="map-section-title">Affected areas (last 30 days)</h2>
+              <p className="map-section-subtitle">
+                Reports with location data; each marker shows how many people reported from that area.
+              </p>
+              {mapLoading ? (
+                <div className="map-placeholder">
+                  <span>Loading map…</span>
+                </div>
+              ) : mapAreas.length === 0 ? (
+                <div className="map-placeholder">
+                  <span>No location-based reports in the last 30 days.</span>
+                </div>
+              ) : (
+                <AffectedAreasMap areas={mapAreas} />
+              )}
+            </section>
+          </div>
 
           <section className="glass card-right">
             <div className="number-header" style={{ marginBottom: 12 }}>
@@ -307,9 +446,21 @@ export default function HomePage() {
                       >
                         <div className="report-header">
                           <div>
-                            <p className="number-phone">{r.phoneNumber}</p>
+                            <div className="report-header-row">
+                              <p className="number-phone">{r.phoneNumber}</p>
+                              {r.riskLevel && (
+                                <span className={`risk-badge risk-${r.riskLevel.toLowerCase()}`}>
+                                  {r.riskLevel}
+                                </span>
+                              )}
+                            </div>
                             <p className="number-meta">
                               {r.category?.name || r.category?.slug || 'Unknown category'}
+                              {r.totalReportsForNumber != null && (
+                                <span className="report-count-meta">
+                                  {' '}· {r.totalReportsForNumber} report{r.totalReportsForNumber !== 1 ? 's' : ''}
+                                </span>
+                              )}
                             </p>
                           </div>
                           <p className="report-time">
@@ -319,6 +470,79 @@ export default function HomePage() {
                         {r.description && (
                           <p className="report-text">{r.description}</p>
                         )}
+                        <div className="report-actions">
+                          <button
+                            type="button"
+                            className="action-btn like-btn"
+                            onClick={() => handleLike(r._id)}
+                            disabled={engagementLoading[r._id]}
+                            title="Like"
+                          >
+                            <span className="action-icon" aria-hidden>👍</span>
+                            <span>{r.likesCount ?? 0}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="action-btn dislike-btn"
+                            onClick={() => handleDislike(r._id)}
+                            disabled={engagementLoading[r._id]}
+                            title="Dislike"
+                          >
+                            <span className="action-icon" aria-hidden>👎</span>
+                            <span>{r.dislikesCount ?? 0}</span>
+                          </button>
+                          <span className="action-label">
+                            <span className="action-icon" aria-hidden>💬</span>
+                            {r.totalComments ?? 0} comment{(r.totalComments ?? 0) !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="report-comments">
+                          {(expandedComments[r._id] ?? r.commentsPreview ?? []).map((c) => (
+                            <div key={c._id} className="comment-item">
+                              <p className="comment-body">{c.body}</p>
+                              <span className="comment-time">
+                                {new Date(c.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                          ))}
+                          {(r.totalComments ?? 0) > (expandedComments[r._id] ?? r.commentsPreview ?? []).length && (
+                            <button
+                              type="button"
+                              className="see-more-comments"
+                              onClick={() => handleSeeMoreComments(r._id, r)}
+                              disabled={loadingMoreComments[r._id]}
+                            >
+                              {loadingMoreComments[r._id]
+                                ? 'Loading…'
+                                : `See more (${(r.totalComments ?? 0) - (expandedComments[r._id] ?? r.commentsPreview ?? []).length} more)`}
+                            </button>
+                          )}
+                          <div className="comment-form">
+                            <input
+                              type="text"
+                              placeholder="Write a comment…"
+                              className="comment-input"
+                              value={commentText[r._id] ?? ''}
+                              onChange={(e) =>
+                                setCommentText((prev) => ({ ...prev, [r._id]: e.target.value }))
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  handleAddComment(r._id)
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              className="comment-submit"
+                              onClick={() => handleAddComment(r._id)}
+                              disabled={submittingComment[r._id] || !(commentText[r._id]?.trim())}
+                            >
+                              {submittingComment[r._id] ? '…' : 'Comment'}
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
