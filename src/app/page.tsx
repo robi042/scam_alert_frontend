@@ -168,6 +168,7 @@ export default function HomePage() {
         }),
       })
       setSuccess('Report submitted successfully.')
+      setReportPhone('')
       setDescription('')
       setSearchPhone(reportPhone)
       setPage(1)
