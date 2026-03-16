@@ -33,6 +33,7 @@ type Report = {
     slug: string
   } | null
   description?: string
+  scamProfileLink?: string
   reporterIP?: string
   createdAt: string
   likesCount?: number
@@ -99,7 +100,9 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 export default function HomePage() {
   const [reportPhone, setReportPhone] = useState('')
   const [searchPhone, setSearchPhone] = useState('')
+  const [searchProfile, setSearchProfile] = useState('')
   const [description, setDescription] = useState('')
+  const [scamProfileLink, setScamProfileLink] = useState('')
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>('')
   const [range, setRange] = useState<string>('')
@@ -173,6 +176,7 @@ export default function HomePage() {
     try {
       const params = new URLSearchParams()
       if (phoneFilter) params.append('phone', phoneFilter)
+      if (searchProfile) params.append('profile', searchProfile)
       if (rangeFilter) params.append('range', rangeFilter)
       params.append('page', String(pageValue))
       params.append('limit', String(limit))
@@ -189,8 +193,8 @@ export default function HomePage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!reportPhone || !selectedCategory) {
-      setError('Phone number and category are required.')
+    if (!selectedCategory || (!reportPhone && !scamProfileLink)) {
+      setError('Category and either a phone number or profile/page link are required.')
       return
     }
     setSubmitting(true)
@@ -203,11 +207,13 @@ export default function HomePage() {
           phoneNumber: reportPhone,
           categoryId: selectedCategory,
           description,
+          scamProfileLink: scamProfileLink || undefined,
         }),
       })
       setSuccess('Report submitted successfully.')
       setReportPhone('')
       setDescription('')
+      setScamProfileLink('')
       setSearchPhone(reportPhone)
       setPage(1)
       await loadList(reportPhone, range, 1)
@@ -383,6 +389,19 @@ export default function HomePage() {
                 />
               </div>
 
+              <div className="field">
+                <label className="field-label">
+                  Scam profile / page link <span style={{ color: '#6b7280' }}>(optional)</span>
+                </label>
+                <input
+                  type="url"
+                  value={scamProfileLink}
+                  onChange={(e) => setScamProfileLink(e.target.value)}
+                  placeholder="Example: https://www.facebook.com/example.scam.page"
+                  className="input"
+                />
+              </div>
+
               {error && (
                 <p className="status-error">{error}</p>
               )}
@@ -513,6 +532,14 @@ export default function HomePage() {
                   onChange={(e) => setSearchPhone(e.target.value)}
                   className="input"
                 />
+                <input
+                  type="text"
+                  placeholder="Search by page / profile name"
+                  value={searchProfile}
+                  onChange={(e) => setSearchProfile(e.target.value)}
+                  className="input"
+                  style={{ maxWidth: 200 }}
+                />
                 <select
                   className="select"
                   value={range}
@@ -612,12 +639,12 @@ export default function HomePage() {
                             </div>
                             <p className="number-meta">
                               {r.category?.name || r.category?.slug || 'Unknown category'}
-                              {r.totalReportsForNumber != null && (
+                              {r.totalReportsForNumber != null && r.totalReportsForNumber > 0 && (
                                 <span className="report-count-meta">
                                   {' '}· {r.totalReportsForNumber} report{r.totalReportsForNumber !== 1 ? 's' : ''}
                                 </span>
                               )}
-                              {r.riskLevel && (
+                              {r.riskLevel && r.totalReportsForNumber != null && r.totalReportsForNumber > 0 && (
                                 <span className="report-count-meta">
                                   {' '}·{' '}
                                   {r.riskLevel === 'LOW' &&
@@ -638,6 +665,18 @@ export default function HomePage() {
                         </div>
                         {r.description && (
                           <p className="report-text">{r.description}</p>
+                        )}
+                        {r.scamProfileLink && (
+                          <div style={{ marginTop: 6 }}>
+                            <button
+                              type="button"
+                              className="action-btn"
+                              onClick={() => window.open(r.scamProfileLink, '_blank', 'noopener,noreferrer')}
+                            >
+                              <span className="action-icon" aria-hidden>🔗</span>
+                              <span>View reported profile / page</span>
+                            </button>
+                          </div>
                         )}
                         <div className="report-actions">
                           <button
