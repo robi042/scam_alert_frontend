@@ -500,6 +500,31 @@ body {
   line-height: 1.45;
 }
 
+.map-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.map-filter-label {
+  font-size: 11px;
+  color: #9ca3af;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.map-filter-select {
+  max-width: 220px;
+}
+
+.map-region-summary {
+  font-size: 11px;
+  color: #6b7280;
+}
+
 .map-wrapper {
   border-radius: 16px;
   overflow: hidden;

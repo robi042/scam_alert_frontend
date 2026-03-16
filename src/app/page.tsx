@@ -41,6 +41,19 @@ type Report = {
   totalComments?: number
 }
 
+type TopNumber = {
+  phoneNumber: string
+  totalReports: number
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  topCategory?: {
+    _id: string
+    name: string
+    slug: string
+    count: number
+  } | null
+  lastReportAt?: string
+}
+
 type Stats = {
   totalReports: number
   categoryCounts: CategoryCount[]
@@ -99,6 +112,10 @@ export default function HomePage() {
   const [success, setSuccess] = useState<string | null>(null)
   const [mapAreas, setMapAreas] = useState<MapArea[]>([])
   const [mapLoading, setMapLoading] = useState(true)
+  const [mapCategoryFilter, setMapCategoryFilter] = useState<string>('') // category slug
+  const [mapRegionSummary, setMapRegionSummary] = useState<string>('')
+  const [topNumbers, setTopNumbers] = useState<TopNumber[]>([])
+  const [topLoading, setTopLoading] = useState<boolean>(true)
   const [expandedComments, setExpandedComments] = useState<Record<string, Comment[]>>({})
   const [loadingMoreComments, setLoadingMoreComments] = useState<Record<string, boolean>>({})
   const [commentText, setCommentText] = useState<Record<string, string>>({})
@@ -118,10 +135,31 @@ export default function HomePage() {
       })
 
     loadList('', '', 1)
-    fetchJson<{ areas: MapArea[] }>(`${API_BASE}/reports/map-data`)
-      .then((data) => setMapAreas(data.areas || []))
-      .catch((e) => console.error('Map data failed', e))
+    fetchJson<{ areas: MapArea[]; byRegion?: { regionName: string; totalReports: number }[] }>(
+      `${API_BASE}/reports/map-data`
+    )
+      .then((data) => {
+        setMapAreas(data.areas || [])
+        if (data.byRegion && data.byRegion.length > 0 && data.byRegion[0].regionName) {
+          const top = data.byRegion[0]
+          setMapRegionSummary(
+            `Most reported region (last 30 days): ${top.regionName} \u2013 ${top.totalReports} reports.`
+          )
+        } else {
+          setMapRegionSummary('')
+        }
+      })
+      .catch((e) => {
+        console.error('Map data failed', e)
+        setMapRegionSummary('')
+      })
       .finally(() => setMapLoading(false))
+
+    setTopLoading(true)
+    fetchJson<{ items: TopNumber[] }>(`${API_BASE}/reports/top?range=this_week&limit=5`)
+      .then((data) => setTopNumbers(data.items || []))
+      .catch((e) => console.error('Top numbers failed', e))
+      .finally(() => setTopLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -367,6 +405,53 @@ export default function HomePage() {
               <p className="map-section-subtitle">
                 Reports with location data; each marker shows how many people reported from that area.
               </p>
+              <div className="map-filters">
+                <label className="map-filter-label">
+                  View by category
+                  <select
+                    className="select map-filter-select"
+                    value={mapCategoryFilter}
+                    onChange={async (e) => {
+                      const slug = e.target.value
+                      setMapCategoryFilter(slug)
+                      setMapLoading(true)
+                      try {
+                        const query = slug ? `?category=${encodeURIComponent(slug)}` : ''
+                        const data = await fetchJson<{
+                          areas: MapArea[]
+                          byRegion?: { regionName: string; totalReports: number }[]
+                        }>(`${API_BASE}/reports/map-data${query}`)
+                        setMapAreas(data.areas || [])
+                        if (data.byRegion && data.byRegion.length > 0 && data.byRegion[0].regionName) {
+                          const top = data.byRegion[0]
+                          setMapRegionSummary(
+                            `Most reported region (last 30 days${
+                              slug ? ` · ${slug.replace('_', ' ')}` : ''
+                            }): ${top.regionName} \u2013 ${top.totalReports} reports.`
+                          )
+                        } else {
+                          setMapRegionSummary('')
+                        }
+                      } catch (err) {
+                        console.error('Map category filter failed', err)
+                        setMapRegionSummary('')
+                      } finally {
+                        setMapLoading(false)
+                      }
+                    }}
+                  >
+                    <option value="">All categories</option>
+                    {categories.map((c) => (
+                      <option key={c._id} value={c.slug}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {mapRegionSummary && (
+                  <p className="map-region-summary">{mapRegionSummary}</p>
+                )}
+              </div>
               {mapLoading ? (
                 <div className="map-placeholder">
                   <span>Loading map…</span>
@@ -378,6 +463,35 @@ export default function HomePage() {
               ) : (
                 <AffectedAreasMap areas={mapAreas} />
               )}
+              <div style={{ marginTop: 10, fontSize: 11, color: '#9ca3af' }}>
+                <span>Official help &amp; support:</span>{' '}
+                <a
+                  href="https://www.cid.gov.bd/hot-line-number-for-cyber-complain"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#a5b4fc' }}
+                >
+                  Cyber Crime Unit
+                </a>
+                {' · '}
+                <a
+                  href="https://www.bkash.com/en/help/contact-us"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#a5b4fc' }}
+                >
+                  bKash Helpline
+                </a>
+                {' · '}
+                <a
+                  href="https://nagad.com.bd/contact/"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#a5b4fc' }}
+                >
+                  Nagad Helpline
+                </a>
+              </div>
             </section>
           </div>
 
@@ -420,6 +534,47 @@ export default function HomePage() {
               </form>
             </div>
 
+            <div className="number-card" style={{ marginBottom: 10 }}>
+              <div className="number-header">
+                <h3 className="card-title">Trending scam numbers (this week)</h3>
+              </div>
+              {topLoading && <p className="empty-text">Loading trending numbers…</p>}
+              {!topLoading && topNumbers.length === 0 && (
+                <p className="empty-text">No trending numbers yet this week.</p>
+              )}
+              {!topLoading && topNumbers.length > 0 && (
+                <div className="reports-list">
+                  {topNumbers.map((n, idx) => (
+                    <div key={`${n.phoneNumber}-${idx}`} className="report-card">
+                      <div className="report-header">
+                        <div>
+                          <div className="report-header-row">
+                            <p className="number-phone">{n.phoneNumber}</p>
+                            {n.riskLevel && (
+                              <span className={`risk-badge risk-${n.riskLevel.toLowerCase()}`}>
+                                {n.riskLevel}
+                              </span>
+                            )}
+                          </div>
+                          <p className="number-meta">
+                            {n.topCategory?.name || n.topCategory?.slug || 'Mixed scam reports'}
+                            <span className="report-count-meta">
+                              {' '}· {n.totalReports} report{n.totalReports !== 1 ? 's' : ''}
+                            </span>
+                          </p>
+                        </div>
+                        {n.lastReportAt && (
+                          <p className="report-time">
+                            Last: {new Date(n.lastReportAt).toLocaleDateString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {listData && listData.stats.categoryCounts.length > 0 && (
               <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {listData.stats.categoryCounts.map((c) => (
@@ -460,6 +615,19 @@ export default function HomePage() {
                               {r.totalReportsForNumber != null && (
                                 <span className="report-count-meta">
                                   {' '}· {r.totalReportsForNumber} report{r.totalReportsForNumber !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {r.riskLevel && (
+                                <span className="report-count-meta">
+                                  {' '}·{' '}
+                                  {r.riskLevel === 'LOW' &&
+                                    'Reputation: low scam activity so far.'}
+                                  {r.riskLevel === 'MEDIUM' &&
+                                    'Reputation: some scam reports \u2013 be careful.'}
+                                  {r.riskLevel === 'HIGH' &&
+                                    'Reputation: many scam reports \u2013 high risk.'}
+                                  {r.riskLevel === 'CRITICAL' &&
+                                    'Reputation: extremely risky number in Bangladesh.'}
                                 </span>
                               )}
                             </p>
@@ -607,6 +775,23 @@ export default function HomePage() {
             </div>
           </section>
         </div>
+
+        <section className="glass" style={{ padding: '18px 22px 20px', marginTop: 16 }}>
+          <h2 className="card-title">Stay safe from scams in Bangladesh</h2>
+          <p className="card-subtitle">
+            Scammers in Bangladesh commonly target bKash, Nagad, job seekers, and online buyers. A few patterns repeat again and again.
+          </p>
+          <ul style={{ marginTop: 10, paddingLeft: 18, fontSize: 12, color: '#9ca3af', lineHeight: 1.6 }}>
+            <li>They claim you won a lottery or prize, then ask for your bKash / Nagad PIN or OTP.</li>
+            <li>They pretend to be from a bank, mobile operator, or bKash support and ask to “verify” your account.</li>
+            <li>They offer high-salary jobs or visas and ask for advance fees via mobile banking.</li>
+            <li>They pressure you to act quickly: “Offer will expire in 5 minutes, send money now.”</li>
+          </ul>
+          <p style={{ marginTop: 10, fontSize: 12, color: '#9ca3af' }}>
+            If you think you have been scammed, immediately contact <strong>999</strong> or your nearest police station,
+            and report the number to the wallet provider (bKash / Nagad / bank).
+          </p>
+        </section>
 
         <footer
           style={{
